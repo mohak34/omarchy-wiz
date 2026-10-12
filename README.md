@@ -24,7 +24,9 @@ Nothing to build. The widget runs `wiz.py`, a standard-library Python script tha
 
 ## Configure
 
-With the setting empty, the helper picks the one bulb on the network that accepts local control and caches its address in `~/.cache/omarchy-wiz/`. If several do, set the bulb's MAC in the widget settings. To list the bulbs on your network:
+Add the plugin while you are on your home network. With the setting empty, the first lookup picks the one bulb that accepts local control and saves it, along with your router, in `~/.cache/omarchy-wiz/`. After that the widget only talks to that bulb and only searches for it behind that router. On any other network it shows "bulb not on this network" and sends nothing. If several bulbs accept local control, set your bulb's MAC in the widget settings. To pair a different bulb, or after replacing your router, delete `~/.cache/omarchy-wiz/` while at home.
+
+To list the bulbs on your network:
 
 ```sh
 python3 ~/.config/omarchy/plugins/mohak34.wiz/wiz.py discover

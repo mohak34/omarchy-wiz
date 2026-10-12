@@ -8,11 +8,13 @@ resident between clicks. Standard library only, so there is nothing to build.
     wiz.py set <mac> <json>       apply setPilot params, then print the new state
     wiz.py discover               list every bulb on the local networks
 
-An empty mac selects the single bulb that accepts unsigned local control
-(WiZ app: Settings > Current home > Security > Local communication > All
-controls). --cached only tries the last known address, and scans the network
-only when nothing is cached yet, so background refreshes stay cheap when the
-bulb is out of reach.
+The first call with an empty mac selects the single bulb that accepts
+unsigned local control (WiZ app: Settings > Current home > Security > Local
+communication > All controls) and caches it together with the router it sits
+behind. From then on only that bulb is accepted, and the network is scanned
+only behind that same router, so the widget never probes or picks up bulbs on
+someone else's network. --cached skips the scan entirely unless nothing is
+cached yet. Delete ~/.cache/omarchy-wiz to pair with a different bulb.
 """
 
 import json
@@ -42,6 +44,12 @@ class Bulb(TypedDict):
     ip: str
     mac: str
     signed: bool
+
+
+class Cache(TypedDict):
+    ip: str
+    mac: str
+    routers: list[str]
 
 
 class State(TypedDict):
@@ -95,17 +103,25 @@ def run(argv: list[str]) -> Any:
 
 def locate(mac: str, scan: bool) -> tuple[str, dict[str, Any]]:
     """Find the bulb's current IP. DHCP can move the bulb, so a stale cached
-    address falls back to a network sweep when scanning is allowed."""
+    address falls back to a network sweep, but only behind the home router."""
     cached = read_cache()
-    if cached and (not mac or mac == cached["mac"]):
+    if cached and mac and mac != cached["mac"]:
+        cached = None  # a different bulb was set in the widget settings
+    routers = gateway_macs()
+    if cached:
+        mac = cached["mac"]
         try:
             pilot = get_pilot(cached["ip"])
-            if pilot.get("mac") == cached["mac"]:
+            if pilot.get("mac") == mac:
+                if not set(routers) <= set(cached["routers"]):
+                    write_cache({"ip": cached["ip"], "mac": mac, "routers": routers})
                 return cached["ip"], pilot
         except WizError:
             pass
+        if cached["routers"] and not set(routers) & set(cached["routers"]):
+            raise WizError("bulb not on this network")
         if not scan:
-            raise WizError(f"bulb at {cached['ip']} did not answer")
+            raise WizError("bulb did not answer")
 
     if mac:
         matches = [b for b in discover() if b["mac"] == mac]
@@ -120,7 +136,7 @@ def locate(mac: str, scan: bool) -> tuple[str, dict[str, Any]]:
 
     ip = matches[0]["ip"]
     pilot = get_pilot(ip)
-    write_cache({"ip": ip, "mac": pilot.get("mac", mac), "signed": False})
+    write_cache({"ip": ip, "mac": matches[0]["mac"], "routers": routers})
     return ip, pilot
 
 
@@ -179,6 +195,22 @@ def local_hosts() -> list[str]:
     return hosts
 
 
+def gateway_macs() -> list[str]:
+    """Hardware addresses of the default gateways, which identify the network
+    the laptop is on regardless of how it numbers its addresses."""
+    gateways = set()
+    for line in Path("/proc/net/route").read_text().splitlines()[1:]:
+        fields = line.split()
+        if int(fields[1], 16) == 0 and int(fields[2], 16) != 0:
+            gateways.add(socket.inet_ntoa(struct.pack("<I", int(fields[2], 16))))
+    macs = []
+    for line in Path("/proc/net/arp").read_text().splitlines()[1:]:
+        ip, _, flags, hw = line.split()[:4]
+        if ip in gateways and int(flags, 16) & 2:
+            macs.append(hw)
+    return sorted(macs)
+
+
 def get_pilot(ip: str) -> dict[str, Any]:
     reply = call(ip, "getPilot", {})
     if "error" in reply:
@@ -228,20 +260,21 @@ def cache_path() -> Path:
     return Path(base) / "omarchy-wiz" / "bulb.json"
 
 
-def read_cache() -> Bulb | None:
+def read_cache() -> Cache | None:
     try:
         data = json.loads(cache_path().read_text())
     except (OSError, ValueError):
         return None
     if isinstance(data, dict) and data.get("ip") and data.get("mac"):
-        return {"ip": data["ip"], "mac": data["mac"], "signed": False}
+        routers = data.get("routers")
+        return {"ip": data["ip"], "mac": data["mac"], "routers": routers if isinstance(routers, list) else []}
     return None
 
 
-def write_cache(bulb: Bulb) -> None:
+def write_cache(cache: Cache) -> None:
     path = cache_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(bulb))
+    path.write_text(json.dumps(cache))
 
 
 def normalize_mac(mac: str) -> str:

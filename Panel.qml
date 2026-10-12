@@ -9,8 +9,8 @@ import "Model.js" as Model
 // bundled wiz.py, which runs once per action and exits, so the widget keeps
 // nothing resident besides this QML. Writes are queued and coalesced:
 // dragging a slider sends only the latest value once the previous command
-// returns. Background refreshes only try the bulb's last known address; the
-// network is scanned only while the panel is open or on a click.
+// returns. Timer refreshes only try the bulb's last known address; opening
+// the panel or a click may rescan, which wiz.py limits to the home network.
 Panel {
   id: root
   moduleName: "mohak34.wiz"
@@ -22,6 +22,8 @@ Panel {
 
   // Last state from the helper: { ip, mac, on, dimming, temp, color, r, g, b, scene, rssi }.
   property var bulb: null
+  // Last state the bulb itself reported, restored when a command fails.
+  property var confirmed: null
   property string error: ""
   property var queued: null
   property real wheelAccumulator: 0
@@ -34,8 +36,10 @@ Panel {
     : bulb.color ? Qt.rgba(bulb.r / 255, bulb.g / 255, bulb.b / 255, 1)
     : Model.tempColor(bulb.temp || 2700)
 
-  function refresh() {
+  // scan lets the helper search the home network when the bulb moved.
+  function refresh(scan) {
     if (getProc.running || setProc.running || queued) return
+    getProc.command = helper.concat(scan ? ["get", mac] : ["get", mac, "--cached"])
     getProc.running = true
   }
 
@@ -68,16 +72,16 @@ Panel {
     var out = null
     try { out = JSON.parse(text) } catch (e) {}
     if (!out) return
-    if (out.error) { error = out.error; return }
+    if (out.error) { error = out.error; bulb = confirmed; return }
     error = ""
     bulb = out
+    confirmed = out
   }
 
-  onOpenedChanged: if (opened) refresh()
+  onOpenedChanged: if (opened) refresh(true)
 
   Process {
     id: getProc
-    command: root.helper.concat(root.opened ? ["get", root.mac] : ["get", root.mac, "--cached"])
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: if (!setProc.running && !root.queued) root.handle(text)
@@ -100,7 +104,7 @@ Panel {
     running: true
     repeat: true
     triggeredOnStart: true
-    onTriggered: root.refresh()
+    onTriggered: root.refresh(false)
   }
 
   implicitWidth: button.implicitWidth
