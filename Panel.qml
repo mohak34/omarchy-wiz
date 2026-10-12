@@ -27,6 +27,12 @@ Panel {
   property string error: ""
   property var queued: null
   property real wheelAccumulator: 0
+  // Saved looks from presets.json, outside the plugin folder so updates and
+  // reinstalls keep them.
+  property var presets: []
+  readonly property string presetsPath: (Quickshell.env("XDG_CONFIG_HOME") || Quickshell.env("HOME") + "/.config") + "/omarchy-wiz/presets.json"
+  // True while a slider value is being typed, so panel keys go to the field.
+  property bool editingValue: false
 
   readonly property bool isOn: !!bulb && bulb.on
   readonly property color foreground: bar ? bar.foreground : Color.foreground
@@ -68,6 +74,28 @@ Panel {
     send({ r: Math.round(c.r * 255), g: Math.round(c.g * 255), b: Math.round(c.b * 255) })
   }
 
+  function savePreset() {
+    if (!bulb) return
+    var p = Model.presetOf(bulb)
+    for (var i = 0; i < presets.length; i++) if (Model.samePreset(presets[i], p)) return
+    writePresets(presets.concat([p]))
+  }
+
+  function removePreset(index) {
+    var list = presets.slice()
+    list.splice(index, 1)
+    writePresets(list)
+  }
+
+  function writePresets(list) {
+    presets = list
+    presetsFile.setText(JSON.stringify(list, null, 2) + "\n")
+  }
+
+  function restoreFocus() {
+    Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
+  }
+
   function handle(text) {
     var out = null
     try { out = JSON.parse(text) } catch (e) {}
@@ -79,6 +107,17 @@ Panel {
   }
 
   onOpenedChanged: if (opened) refresh(true)
+
+  FileView {
+    id: presetsFile
+    path: root.presetsPath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.presets = Model.parsePresets(text())
+    onLoadFailed: root.presets = []
+    onFileChanged: reload()
+  }
 
   Process {
     id: getProc
@@ -142,6 +181,7 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      blocked: root.editingValue
       onMoveRequested: function(dx, dy) { if (dx !== 0 && root.bulb) root.setBrightness(root.bulb.dimming + dx * 10) }
       onActivateRequested: root.togglePower()
       onCloseRequested: root.close()
@@ -196,6 +236,44 @@ Panel {
 
           PanelSeparator { foreground: root.foreground }
 
+          Column {
+            width: parent.width
+            spacing: Style.space(4)
+
+            Item {
+              width: parent.width
+              implicitHeight: Math.max(savedHeader.implicitHeight, addButton.implicitHeight)
+
+              PanelSectionHeader {
+                id: savedHeader
+                text: "SAVED"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+              }
+
+              PanelActionButton {
+                id: addButton
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                enabled: root.isOn
+                iconText: Model.addGlyph
+                tooltipText: "Save current light"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                onClicked: root.savePreset()
+              }
+            }
+
+            Repeater {
+              model: root.presets
+              PresetRow {}
+            }
+          }
+
+          PanelSeparator { foreground: root.foreground }
+
           SliderSection {
             label: "BRIGHTNESS"
             unit: "%"
@@ -214,9 +292,10 @@ Panel {
             minimum: Model.minTemp
             maximum: Model.maxTemp
             step: 100
+            snap: 100
             value: root.bulb && root.bulb.temp ? root.bulb.temp : 2700
             sliderOpacity: white ? 1.0 : 0.5
-            onMoved: function(v) { root.send({ temp: Math.round(v / 100) * 100 }) }
+            onMoved: function(v) { root.send({ temp: Math.round(v) }) }
           }
 
           Column {
@@ -322,7 +401,95 @@ Panel {
     }
   }
 
+  // One saved look: swatch, name, value. Click applies it; the row is
+  // highlighted while the light matches it.
+  component PresetRow: CursorSurface {
+    id: row
+    required property var modelData
+    required property int index
+    readonly property bool active: Model.presetActive(root.bulb, modelData)
+
+    width: parent.width
+    implicitHeight: rowContent.implicitHeight + Style.spacing.rowPaddingX
+    hasCursor: rowMouse.containsMouse
+    current: active
+    foreground: root.foreground
+
+    MouseArea {
+      id: rowMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: root.send(Model.copy(row.modelData))
+    }
+
+    Item {
+      id: rowContent
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(6)
+      implicitHeight: Math.max(nameLabel.implicitHeight, removeButton.implicitHeight)
+
+      Rectangle {
+        id: swatch
+        width: Style.space(12)
+        height: width
+        radius: width / 2
+        color: Model.presetColor(row.modelData)
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+      }
+
+      Text {
+        id: nameLabel
+        textFormat: Text.PlainText
+        text: Model.presetLabel(row.modelData)
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        font.bold: row.active
+        elide: Text.ElideRight
+        anchors.left: swatch.right
+        anchors.leftMargin: Style.space(10)
+        anchors.right: valueText.left
+        anchors.rightMargin: Style.space(8)
+        anchors.verticalCenter: parent.verticalCenter
+      }
+
+      Text {
+        id: valueText
+        textFormat: Text.PlainText
+        text: Model.presetValue(row.modelData)
+        color: row.active ? root.foreground : root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        anchors.right: removeButton.left
+        anchors.rightMargin: Style.space(6)
+        anchors.verticalCenter: parent.verticalCenter
+      }
+
+      PanelActionButton {
+        id: removeButton
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        property bool pointerOver: false
+        opacity: rowMouse.containsMouse || pointerOver ? 1 : 0
+        onHovered: function(isHovered) { pointerOver = isHovered }
+        iconText: Model.removeGlyph
+        tooltipText: "Remove"
+        foreground: root.foreground
+        hoverColor: root.bar ? root.bar.urgent : Color.urgent
+        fontFamily: root.fontFamily
+        onClicked: root.removePreset(row.index)
+      }
+    }
+  }
+
   // Section header with the current value on the right, over a slider.
+  // Clicking the value turns it into a field: type a number, Enter applies,
+  // Esc cancels.
   component SliderSection: Column {
     id: section
     property string label: ""
@@ -331,16 +498,38 @@ Panel {
     property real minimum: 0
     property real maximum: 1
     property real step: 1
+    // Dragging rounds to this; typed values are sent as typed.
+    property real snap: 1
     property real value: 0
     property real sliderOpacity: 1.0
+    property bool editing: false
     signal moved(real value)
+
+    function startEdit() {
+      editing = true
+      root.editingValue = true
+      Qt.callLater(function() {
+        valueField.text = String(Math.round(section.value))
+        valueField.selectAll()
+        valueField.forceActiveFocus()
+      })
+    }
+
+    function endEdit(commit) {
+      if (!editing) return
+      editing = false
+      root.editingValue = false
+      var v = parseInt(valueField.text, 10)
+      if (commit && !isNaN(v)) section.moved(Math.max(section.minimum, Math.min(section.maximum, v)))
+      root.restoreFocus()
+    }
 
     width: parent.width
     spacing: Style.space(6)
 
     Item {
       width: parent.width
-      implicitHeight: Math.max(header.implicitHeight, valueLabel.implicitHeight)
+      implicitHeight: Math.max(header.implicitHeight, valueLabel.implicitHeight, section.editing ? valueField.implicitHeight : 0)
 
       PanelSectionHeader {
         id: header
@@ -354,15 +543,49 @@ Panel {
       Text {
         id: valueLabel
         textFormat: Text.PlainText
-        visible: section.showValue
-        text: Math.round(slider.dragging ? slider.liveValue : section.value) + section.unit
-        color: root.dim
+        visible: !section.editing
+        text: section.showValue ? Math.round(slider.dragging ? slider.liveValue : section.value) + section.unit : "--"
+        color: valueMouse.containsMouse ? root.foreground : root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         font.bold: true
+        font.underline: valueMouse.containsMouse
         anchors.right: parent.right
         anchors.rightMargin: Style.space(6)
         anchors.verticalCenter: parent.verticalCenter
+
+        MouseArea {
+          id: valueMouse
+          anchors.fill: parent
+          anchors.margins: -Style.space(4)
+          hoverEnabled: true
+          cursorShape: Qt.IBeamCursor
+          onClicked: section.startEdit()
+        }
+      }
+
+      TextField {
+        id: valueField
+        visible: section.editing
+        width: Style.space(72)
+        verticalPadding: 0
+        horizontalAlignment: TextInput.AlignRight
+        foreground: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        validator: IntValidator { bottom: 0; top: section.maximum }
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        Keys.onPressed: function(event) {
+          if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            section.endEdit(true)
+            event.accepted = true
+          } else if (event.key === Qt.Key_Escape) {
+            section.endEdit(false)
+            event.accepted = true
+          }
+        }
+        onActiveFocusChanged: if (!activeFocus) section.endEdit(false)
       }
     }
 
@@ -377,7 +600,7 @@ Panel {
       integer: true
       value: section.value
       opacity: section.sliderOpacity
-      onMoved: function(v) { section.moved(v) }
+      onMoved: function(v) { section.moved(Math.round(v / section.snap) * section.snap) }
     }
   }
 }
