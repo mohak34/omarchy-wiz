@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.mohak34.lucerna",
-  "name": "Lucerna",
+  "id": "mohak34.wiz",
+  "name": "WiZ",
   "version": "0.1.0",
   "author": "mohak34",
   "license": "MIT",
@@ -9,7 +9,7 @@
   "kinds": ["bar-widget"],
   "entryPoints": { "barWidget": "Panel.qml" },
   "barWidget": {
-    "displayName": "Lucerna",
+    "displayName": "WiZ",
     "description": "Click for the light panel, right-click to switch the bulb on or off, scroll to change brightness.",
     "category": "Home",
     "allowMultiple": false,

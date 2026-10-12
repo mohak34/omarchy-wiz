@@ -6,16 +6,16 @@ import qs.Ui
 import "Model.js" as Model
 
 // Bar button plus popup for one WiZ bulb. Every bulb call goes through the
-// bundled bin/lucerna helper, which runs once per action and exits, so the
+// bundled bin/wiz helper, which runs once per action and exits, so the
 // widget keeps nothing resident besides this QML. Writes are queued and
 // coalesced: dragging a slider sends only the latest value once the previous
 // command returns.
 Panel {
   id: root
-  moduleName: "io.github.mohak34.lucerna"
+  moduleName: "mohak34.wiz"
   manageIpc: false
 
-  readonly property string helper: decodeURIComponent(Qt.resolvedUrl("bin/lucerna").toString().replace(/^file:\/\//, ""))
+  readonly property string helper: decodeURIComponent(Qt.resolvedUrl("bin/wiz").toString().replace(/^file:\/\//, ""))
   readonly property string mac: String(setting("mac", ""))
   readonly property int refreshMs: Math.max(10, parseInt(setting("refreshIntervalSec", 60), 10) || 60) * 1000
 

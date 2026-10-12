@@ -1,10 +1,10 @@
-// Command lucerna talks to a WiZ bulb over its local UDP API and prints one
+// Command wiz talks to a WiZ bulb over its local UDP API and prints one
 // JSON object on stdout. The bar widget runs it once per action or refresh,
 // so nothing stays resident between clicks.
 //
-//	lucerna get <mac>          print the bulb state
-//	lucerna set <mac> <json>   apply setPilot params, then print the new state
-//	lucerna discover           list every bulb on the local networks
+//	wiz get <mac>          print the bulb state
+//	wiz set <mac> <json>   apply setPilot params, then print the new state
+//	wiz discover           list every bulb on the local networks
 //
 // An empty mac selects the single bulb that accepts unsigned local control
 // (WiZ app: Settings > Security > Local communication > All controls).
@@ -81,7 +81,7 @@ func main() {
 
 func run(args []string) (any, error) {
 	if len(args) == 0 {
-		return nil, errors.New("usage: lucerna get <mac> | set <mac> <json> | discover")
+		return nil, errors.New("usage: wiz get <mac> | set <mac> <json> | discover")
 	}
 	conn, err := net.ListenUDP("udp4", nil)
 	if err != nil {
@@ -298,7 +298,7 @@ func cachePath() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, "lucerna", "bulb.json")
+	return filepath.Join(dir, "omarchy-wiz", "bulb.json")
 }
 
 func readCache() bulb {
