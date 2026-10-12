@@ -6,16 +6,17 @@ import qs.Ui
 import "Model.js" as Model
 
 // Bar button plus popup for one WiZ bulb. Every bulb call goes through the
-// bundled bin/wiz helper, which runs once per action and exits, so the
-// widget keeps nothing resident besides this QML. Writes are queued and
-// coalesced: dragging a slider sends only the latest value once the previous
-// command returns.
+// bundled wiz.py, which runs once per action and exits, so the widget keeps
+// nothing resident besides this QML. Writes are queued and coalesced:
+// dragging a slider sends only the latest value once the previous command
+// returns. Background refreshes only try the bulb's last known address; the
+// network is scanned only while the panel is open or on a click.
 Panel {
   id: root
   moduleName: "mohak34.wiz"
   manageIpc: false
 
-  readonly property string helper: decodeURIComponent(Qt.resolvedUrl("bin/wiz").toString().replace(/^file:\/\//, ""))
+  readonly property var helper: ["python3", "-I", decodeURIComponent(Qt.resolvedUrl("wiz.py").toString().replace(/^file:\/\//, ""))]
   readonly property string mac: String(setting("mac", ""))
   readonly property int refreshMs: Math.max(10, parseInt(setting("refreshIntervalSec", 60), 10) || 60) * 1000
 
@@ -49,7 +50,7 @@ Panel {
 
   function flush() {
     if (setProc.running || !queued) return
-    setProc.command = [helper, "set", mac, JSON.stringify(queued)]
+    setProc.command = helper.concat(["set", mac, JSON.stringify(queued)])
     queued = null
     setProc.running = true
   }
@@ -76,7 +77,7 @@ Panel {
 
   Process {
     id: getProc
-    command: [root.helper, "get", root.mac]
+    command: root.helper.concat(root.opened ? ["get", root.mac] : ["get", root.mac, "--cached"])
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: if (!setProc.running && !root.queued) root.handle(text)
