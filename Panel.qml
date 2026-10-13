@@ -69,8 +69,9 @@ Panel {
 
   function setBrightness(v) { send({ dimming: Math.max(10, Math.min(100, Math.round(v))) }) }
 
-  function setHue(h) {
-    var c = Qt.hsva(Math.max(0, Math.min(1, h)), 1, 1, 1)
+  // h and s run 0..1; full value, since brightness is its own control.
+  function setColor(h, s) {
+    var c = Qt.hsva(Math.max(0, Math.min(1, h)), Math.max(0, Math.min(1, s)), 1, 1)
     send({ r: Math.round(c.r * 255), g: Math.round(c.g * 255), b: Math.round(c.b * 255) })
   }
 
@@ -302,28 +303,53 @@ Panel {
             width: parent.width
             spacing: Style.space(6)
 
-            PanelSectionHeader {
-              text: "COLOR"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
+            Item {
+              width: parent.width
+              implicitHeight: Math.max(colorHeader.implicitHeight, hexValue.implicitHeight)
+
+              PanelSectionHeader {
+                id: colorHeader
+                text: "COLOR"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+              }
+
+              EditableValue {
+                id: hexValue
+                readonly property string hex: root.bulb && root.bulb.color ? Model.hex(root.bulb.r, root.bulb.g, root.bulb.b).toUpperCase() : ""
+                text: hex || "--"
+                editText: hex
+                maximumLength: 7
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(6)
+                anchors.verticalCenter: parent.verticalCenter
+                onCommitted: function(text) {
+                  var c = Model.parseHex(text)
+                  if (c) root.send(c)
+                }
+              }
             }
 
+            // Hue left to right, saturation top (full) to bottom (pale). The
+            // knob marks the light's colour while it is in colour mode.
             Item {
-              id: hueStrip
-              width: parent.width
-              implicitHeight: Style.space(22)
-              readonly property bool showKnob: !!root.bulb && root.bulb.color
-              readonly property real hue: showKnob ? Math.max(0, root.lightColor.hsvHue) : 0
+              id: colorPad
+              width: parent.width - Style.space(12)
+              x: Style.space(6)
+              implicitHeight: Style.space(110)
+              readonly property bool showKnob: !!root.bulb && root.bulb.color && root.bulb.scene === 0
+              readonly property real hue: Math.max(0, root.lightColor.hsvHue)
+              readonly property real saturation: root.lightColor.hsvSaturation
+
+              function pick(mouse) {
+                root.setColor(mouse.x / width, 1 - mouse.y / height)
+              }
 
               Rectangle {
-                id: hueTrack
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.leftMargin: Style.space(6)
-                anchors.rightMargin: Style.space(6)
-                height: Style.space(10)
-                radius: Style.cornerRadius > 0 ? height / 2 : 0
+                anchors.fill: parent
+                radius: Style.cornerRadius
                 gradient: Gradient {
                   orientation: Gradient.Horizontal
                   GradientStop { position: 0.0; color: "#ff0000" }
@@ -336,24 +362,31 @@ Panel {
                 }
               }
 
+              Rectangle {
+                anchors.fill: parent
+                radius: Style.cornerRadius
+                gradient: Gradient {
+                  GradientStop { position: 0.0; color: "#00ffffff" }
+                  GradientStop { position: 1.0; color: "#ffffff" }
+                }
+              }
+
               BorderSurface {
-                visible: hueStrip.showKnob
+                visible: colorPad.showKnob
                 width: Style.space(16)
                 height: width
                 radius: width / 2
                 color: root.lightColor
                 borderSpec: Border.flat(root.bar ? root.bar.background : Color.background, Math.max(1, Style.space(2)))
-                anchors.verticalCenter: hueTrack.verticalCenter
-                x: hueTrack.x + hueTrack.width * hueStrip.hue - width / 2
+                x: colorPad.width * colorPad.hue - width / 2
+                y: colorPad.height * (1 - colorPad.saturation) - height / 2
               }
 
               MouseArea {
-                anchors.fill: hueTrack
-                anchors.topMargin: -Style.space(6)
-                anchors.bottomMargin: -Style.space(6)
-                cursorShape: Qt.PointingHandCursor
-                onPressed: function(mouse) { root.setHue(mouse.x / width) }
-                onPositionChanged: function(mouse) { if (pressed) root.setHue(mouse.x / width) }
+                anchors.fill: parent
+                cursorShape: Qt.CrossCursor
+                onPressed: function(mouse) { colorPad.pick(mouse) }
+                onPositionChanged: function(mouse) { if (pressed) colorPad.pick(mouse) }
               }
             }
           }
@@ -487,9 +520,87 @@ Panel {
     }
   }
 
-  // Section header with the current value on the right, over a slider.
-  // Clicking the value turns it into a field: type a number, Enter applies,
-  // Esc cancels.
+  // Value shown at the right of a section header. Clicking it turns it into a
+  // field: Enter commits, Esc or clicking elsewhere cancels.
+  component EditableValue: Item {
+    id: editable
+    property string text: ""
+    property string editText: text
+    property int maximumLength: 8
+    property bool editing: false
+    signal committed(string text)
+
+    implicitWidth: editing ? field.width : label.implicitWidth
+    implicitHeight: editing ? field.implicitHeight : label.implicitHeight
+
+    function startEdit() {
+      editing = true
+      root.editingValue = true
+      Qt.callLater(function() {
+        field.text = editable.editText
+        field.selectAll()
+        field.forceActiveFocus()
+      })
+    }
+
+    function endEdit(commit) {
+      if (!editing) return
+      editing = false
+      root.editingValue = false
+      if (commit) editable.committed(field.text.trim())
+      root.restoreFocus()
+    }
+
+    Text {
+      id: label
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      visible: !editable.editing
+      textFormat: Text.PlainText
+      text: editable.text
+      color: labelMouse.containsMouse ? root.foreground : root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      font.bold: true
+      font.underline: labelMouse.containsMouse
+
+      MouseArea {
+        id: labelMouse
+        anchors.fill: parent
+        anchors.margins: -Style.space(4)
+        hoverEnabled: true
+        cursorShape: Qt.IBeamCursor
+        onClicked: editable.startEdit()
+      }
+    }
+
+    TextField {
+      id: field
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      visible: editable.editing
+      width: Style.space(80)
+      verticalPadding: 0
+      maximumLength: editable.maximumLength
+      horizontalAlignment: TextInput.AlignRight
+      foreground: root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+          editable.endEdit(true)
+          event.accepted = true
+        } else if (event.key === Qt.Key_Escape) {
+          editable.endEdit(false)
+          event.accepted = true
+        }
+      }
+      onActiveFocusChanged: if (!activeFocus) editable.endEdit(false)
+    }
+  }
+
+  // Section header with the current value on the right, over a slider. The
+  // value can be typed in; out-of-range numbers are clamped.
   component SliderSection: Column {
     id: section
     property string label: ""
@@ -502,34 +613,14 @@ Panel {
     property real snap: 1
     property real value: 0
     property real sliderOpacity: 1.0
-    property bool editing: false
     signal moved(real value)
-
-    function startEdit() {
-      editing = true
-      root.editingValue = true
-      Qt.callLater(function() {
-        valueField.text = String(Math.round(section.value))
-        valueField.selectAll()
-        valueField.forceActiveFocus()
-      })
-    }
-
-    function endEdit(commit) {
-      if (!editing) return
-      editing = false
-      root.editingValue = false
-      var v = parseInt(valueField.text, 10)
-      if (commit && !isNaN(v)) section.moved(Math.max(section.minimum, Math.min(section.maximum, v)))
-      root.restoreFocus()
-    }
 
     width: parent.width
     spacing: Style.space(6)
 
     Item {
       width: parent.width
-      implicitHeight: Math.max(header.implicitHeight, valueLabel.implicitHeight, section.editing ? valueField.implicitHeight : 0)
+      implicitHeight: Math.max(header.implicitHeight, valueEdit.implicitHeight)
 
       PanelSectionHeader {
         id: header
@@ -540,52 +631,18 @@ Panel {
         anchors.verticalCenter: parent.verticalCenter
       }
 
-      Text {
-        id: valueLabel
-        textFormat: Text.PlainText
-        visible: !section.editing
+      EditableValue {
+        id: valueEdit
         text: section.showValue ? Math.round(slider.dragging ? slider.liveValue : section.value) + section.unit : "--"
-        color: valueMouse.containsMouse ? root.foreground : root.dim
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        font.bold: true
-        font.underline: valueMouse.containsMouse
+        editText: String(Math.round(section.value))
+        maximumLength: 5
         anchors.right: parent.right
         anchors.rightMargin: Style.space(6)
         anchors.verticalCenter: parent.verticalCenter
-
-        MouseArea {
-          id: valueMouse
-          anchors.fill: parent
-          anchors.margins: -Style.space(4)
-          hoverEnabled: true
-          cursorShape: Qt.IBeamCursor
-          onClicked: section.startEdit()
+        onCommitted: function(text) {
+          var v = parseInt(text, 10)
+          if (!isNaN(v)) section.moved(Math.max(section.minimum, Math.min(section.maximum, v)))
         }
-      }
-
-      TextField {
-        id: valueField
-        visible: section.editing
-        width: Style.space(72)
-        verticalPadding: 0
-        horizontalAlignment: TextInput.AlignRight
-        foreground: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
-        validator: IntValidator { bottom: 0; top: section.maximum }
-        anchors.right: parent.right
-        anchors.verticalCenter: parent.verticalCenter
-        Keys.onPressed: function(event) {
-          if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            section.endEdit(true)
-            event.accepted = true
-          } else if (event.key === Qt.Key_Escape) {
-            section.endEdit(false)
-            event.accepted = true
-          }
-        }
-        onActiveFocusChanged: if (!activeFocus) section.endEdit(false)
       }
     }
 

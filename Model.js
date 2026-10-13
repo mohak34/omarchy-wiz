@@ -93,6 +93,14 @@ function hex(r, g, b) {
   return "#" + [r, g, b].map(function(v) { return (v < 16 ? "0" : "") + v.toString(16) }).join("")
 }
 
+// "#7a3cff", "7A3CFF" or "#a3f" as setPilot colour params, or null.
+function parseHex(text) {
+  var m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(text).trim())
+  if (!m) return null
+  var h = m[1].length === 3 ? m[1].replace(/./g, "$&$&") : m[1]
+  return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) }
+}
+
 // Everyday name for an RGB colour: its hue bucket, "Pale" when washed out.
 function colorName(r, g, b) {
   var max = Math.max(r, g, b), min = Math.min(r, g, b)
