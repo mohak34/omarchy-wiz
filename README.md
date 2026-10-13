@@ -6,6 +6,13 @@ Control a WiZ bulb from the Omarchy bar. Power, brightness, white temperature, c
 - Right-click: switch the bulb on or off
 - Scroll: brightness
 
+In the panel:
+
+- **Saved:** `+` saves the current look (brightness plus white, color or scene). Click a row to apply it, hover it to remove it. The row matching the light is highlighted. Presets live in `~/.config/omarchy-wiz/presets.json`.
+- **Brightness and White:** drag the slider, or click the number and type a value, then Enter.
+- **Color:** click or drag on the pad. Left to right picks the hue, top to bottom fades to white. Click the hex code to type one (`#7a3cff`, `7a3cff` or `#a3f`).
+- **Scenes:** the active scene is highlighted.
+
 ## Requirements
 
 - Omarchy 4 (Quattro shell)
